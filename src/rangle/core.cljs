@@ -45,13 +45,24 @@
 (def sq-close-tolerance (square close-tolerance))
 (def sq-min-dot-distance (square min-dot-distance))
 
-(defn event-location [$container e]
+(defn string-starts-with [haystack needle]
+  (= (subs haystack 0 (count needle)) needle))
+
+(defn mouse-event-location [$container e]
   (let [x (- (.-pageX e) (-> $container .offset .-left))
         y (- (.-pageY e) (-> $container .offset .-top))]
     [x y]))
 
+(defn touch-event-location [$container e]
+  (let [touch (-> e .-originalEvent .-touches (aget 0))]
+    (mouse-event-location $container touch)))
+
 (defn xy-message [ch message-name $container e]
-  (put! ch [message-name (event-location $container e)]))
+  (let [event-type (.-type e)
+        event-location (cond (string-starts-with event-type "mouse") mouse-event-location
+                             (string-starts-with event-type "touch") touch-event-location
+                             :else (throw (js/Error. (str "Unknown event type: " event-type))))]
+  (put! ch [message-name (event-location $container e)])))
 
 (defn mousemove-handler [ch $container e]
   (if (pos? (.-which e))
@@ -63,6 +74,9 @@
     (jq/on $element :mousemove (partial mousemove-handler ch $element))
     (jq/on $element :mousedown (partial xy-message ch :drawstart $element))
     (jq/on $element [:mouseup :mouseleave] (fn [] (put! ch [:drawend])))
+    (jq/on $element :touchmove (partial xy-message ch :draw $element))
+    (jq/on $element :touchstart (partial xy-message ch :drawstart $element))
+    (jq/on $element :touchend (fn [] (put! ch [:drawend])))
     ch))
 
 (defn add-background [paper]
@@ -71,7 +85,8 @@
                         "stroke" 0))))
 
 (defn disable-drag-selection [$element]
-  (jq/on $element :mousedown jq/prevent))
+  (jq/on $element :mousedown jq/prevent)
+  (jq/on $element :touchmove jq/prevent))
 
 (defn vec-command [command & points]
   (str command (str/join " " (flatten points))))
