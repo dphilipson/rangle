@@ -16,9 +16,7 @@
               :source-paths ["src"]
               :compiler {
                 :output-to "target/rangle.js"
-                :optimizations :whitespace
-                :pretty-print true
+                :optimizations :advanced
                 :externs ["externs/jquery-1.9.js"
                           "externs/raphael-min.js"]
-                :source-map "target/rangle.js.map"
                 }}]})
