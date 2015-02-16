@@ -64,12 +64,20 @@
     (empty? points) ""
     (= (count points) 1) (vec-command "M" (first points))
     :else (let [midpoint (fn [[x1 y1] [x2 y2]] [(/ (+ x1 x2) 2) (/ (+ y1 y2) 2)])
-                inner-points (map midpoint (subvec points 1) (subvec points 2 (dec (count points))))
-                inner-curves (if (> (count points) 3)
-                               (map-indexed (fn [i midpoint] (vec-command "Q" (points (inc i)) midpoint)) inner-points)
+                ;; Having path coordinates be non-integers avoids a Raphael path intersection bug.
+                nudged-points (vec (map (partial map (partial + 0.01)) points))
+                inner-points (map midpoint
+                                  (subvec nudged-points 1)
+                                  (subvec nudged-points 2 (dec (count nudged-points))))
+                inner-curves (if (> (count nudged-points) 3)
+                               (map-indexed (fn [i midpoint]
+                                              (vec-command "Q" (nudged-points (inc i)) midpoint))
+                                            inner-points)
                                "")
-                first-curve (vec-command "M" (first points))
-                last-curve (vec-command "Q" (points (- (count points) 2)) (last points))
+                first-curve (vec-command "M" (first nudged-points))
+                last-curve (vec-command "Q"
+                                        (nudged-points (- (count nudged-points) 2))
+                                        (last nudged-points))
                 closing (if closed? "Z" "")]
             (str first-curve (str/join inner-curves) last-curve closing))))
 
@@ -101,7 +109,7 @@
   (async-some (comp message-name-set first) ch))
 
 (defn update-path [path points closed?]
-  (.attr path "path" (smooth-path-from-points points closed?)))
+  (.attr path "path" (log-return-value "pathstring: " smooth-path-from-points points closed?)))
 
 (defn should-close? [points]
   (and (some #(> (distance-squared (first points) %) sq-close-tolerance) points)
