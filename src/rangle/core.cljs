@@ -241,7 +241,8 @@
   (map :loc dots))
 
 (defn create-random-dot [paper current-dots]
-  (create-dot paper (random-color) (random-dot-location (dot-locations current-dots))))
+  (when-let [loc (random-dot-location (dot-locations current-dots))]
+    (create-dot paper (random-color) loc)))
 
 (defn create-random-dots [n paper current-dots]
   "Creates n new dots, taking into account the positions of the current dots.
