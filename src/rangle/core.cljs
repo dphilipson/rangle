@@ -232,10 +232,16 @@
 (defn num-dots-to-add [num-dots-removed]
   (quot (* 4 num-dots-removed) 3))
 
-(defn ^:export inhabit [selector]
+(defn num-points-awarded [num-dots]
+  (/ (* num-dots (inc num-dots)) 2))
+
+(defn ^:export inhabit [container score-field]
   (let
     [$container
-     ($ selector)
+     ($ container)
+
+     $score-field
+     ($ score-field)
 
      paper
      (js/Raphael (.get $container 0) width height)
@@ -288,7 +294,9 @@
        (disable-drag-selection)
        (jq/css $container :display "inline-block")
        (go
-         (loop [dots (create-random-dots num-initial-dots paper [])]
+         (loop [dots (create-random-dots num-initial-dots paper [])
+                score 0]
+           (.text $score-field (str "Score: " score))
            (let [[_ point] (<! (next-message #{:drawstart} draw-ch))]
              (let [curve (<! (draw-loop point))]
                (if (path-is-closed? curve)
@@ -300,12 +308,13 @@
                          remaining-dots (filter #(not (contains? dots-to-remove %)) dots)
                          new-dots (create-random-dots (num-dots-to-add (count dots-to-remove))
                                                       paper
-                                                      remaining-dots)]
+                                                      remaining-dots)
+                         new-score (+ score (num-points-awarded (count dots-to-remove)))]
                      (doseq [dot dots-to-remove] (animate-dot-exit dot))
                      (animate-loop-exit curve)
-                     (recur new-dots)))
+                     (recur new-dots new-score)))
                  (do
                    (animate-invalid-exit curve)
-                   (recur dots))))))))
+                   (recur dots score))))))))
      ]
     (initialize)))

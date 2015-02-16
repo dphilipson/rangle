@@ -18,12 +18,13 @@
   </head>
   <body>
     <h1>Welcome to Rangle</h1>
+    <p id="score-field"></p>
     <div id="container"></div>
 
     <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
     <script src="//maxcdn.bootstrapcdn.com/bootstrap/3.3.1/js/bootstrap.min.js"></script>
     <script src="//cdnjs.cloudflare.com/ajax/libs/raphael/2.1.2/raphael-min.js"></script>
     <script src="target/rangle.js" type="text/javascript"></script>
-    <script type="text/javascript">rangle.core.inhabit('#container');</script>
+    <script type="text/javascript">rangle.core.inhabit('#container', '#score-field');</script>
   </body>
 </html>
