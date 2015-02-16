@@ -30,7 +30,7 @@
 (def dot-fadeout-radius (* 3 dot-radius))
 
 (def min-dot-distance 25)
-(def min-dot-edge-distance min-dot-distance)
+(def min-dot-edge-distance 40)
 (def num-dot-candidates 2)
 (def max-dot-attempts 100)
 
@@ -53,13 +53,30 @@
     (xy-message ch :draw e)
     (put! ch [:drawend])))
 
-(defn draw-event-capture [ch selector]
-  (jq/on ($ selector) :mousemove (partial mousemove-handler ch))
-  (jq/on ($ selector) :mousedown (partial xy-message ch :drawstart))
-  (jq/on ($ selector) [:mouseup :mouseleave] (fn [] (put! ch [:drawend]))))
+(defn draw-channel [$element]
+  (let [ch (chan)]
+    (jq/on $element :mousemove (partial mousemove-handler ch))
+    (jq/on $element :mousedown (partial xy-message ch :drawstart))
+    (jq/on $element [:mouseup :mouseleave] (fn [] (put! ch [:drawend])))
+    ch))
+
+(defn add-background [paper]
+  (let [rect (.rect paper 0 0 width height)]
+    (.attr rect (js-obj "fill" "270-#ccc-#888"
+                        "stroke" 0))))
+
+(defn disable-drag-selection [$element]
+  (jq/on $element :mousedown jq/prevent))
 
 (defn vec-command [command & points]
   (str command (str/join " " (flatten points))))
+
+(defn setup-paper [$container]
+  (disable-drag-selection $container)
+  (jq/css $container :display "inline-block")
+  (let [paper (js/Raphael (.get $container 0) width height)]
+    (add-background paper)
+    paper))
 
 (defn smooth-path-from-points [points closed?]
   (cond
@@ -83,14 +100,40 @@
                 closing (if closed? "Z" "")]
             (str first-curve (str/join inner-curves) last-curve closing))))
 
-(defn simple-path-from-points [points]
-  (let [splat (fn [code point] (str code (point 0) " " (point 1)))
-        [start & others] points]
-    (apply str (cons (splat "M" start) (map (partial splat "L") points)))))
+(defn create-path [paper initial-point]
+  (let [path (.path paper (vec-command "M" initial-point))]
+    (.attr path (js-obj "stroke" "black"
+                        "stroke-width" path-width
+                        "stroke-linecap" "round"
+                        "stroke-linejoin" "round"))
+    path))
 
 (defn distance-squared [[x1 y1] [x2 y2]]
   (let [square (fn [x] (* x x))]
     (+ (square (- x1 x2)) (square (- y1 y2)))))
+
+(defn update-path [path points closed?]
+  (.attr path "path" (smooth-path-from-points points closed?)))
+
+(defn should-close? [points]
+  (and (some #(> (distance-squared (first points) %) sq-close-tolerance) points)
+       (< (distance-squared (first points) (last points)) sq-close-tolerance)))
+
+(defn get-drawn-path [paper draw-ch initial-point]
+  (let [curve (create-path paper initial-point)]
+    (go 
+      (loop [points [initial-point]]
+        (update-path curve points false)
+        (let [[message-name data] (<! draw-ch)]
+          (if (= message-name :draw)
+            (let [new-points (if (> (distance-squared (last points) data) sq-new-point-threshold)
+                               (conj points data)
+                               points)]
+              (if (should-close? points)
+                (do (update-path curve points true)
+                    curve)
+                (recur new-points)))
+            curve))))))
 
 (defn async-some [predicate ch]
   (go
@@ -109,13 +152,6 @@
 
 (defn next-message [message-name-set ch]
   (async-some (comp message-name-set first) ch))
-
-(defn update-path [path points closed?]
-  (.attr path "path" (smooth-path-from-points points closed?)))
-
-(defn should-close? [points]
-  (and (some #(> (distance-squared (first points) %) sq-close-tolerance) points)
-       (< (distance-squared (first points) (last points)) sq-close-tolerance)))
 
 (defn animate-loop-exit [path]
   (.attr path (js-obj "fill" "blue"
@@ -243,62 +279,20 @@
      $score-field
      ($ score-field)
 
-     paper
-     (js/Raphael (.get $container 0) width height)
-
      draw-ch
-     (let [ch (chan)]
-       (draw-event-capture ch $container)
-       ch)
+     (draw-channel $container)
 
-     new-path
-     (fn [initial-point]
-       (let [curve (.path paper (vec-command "M" initial-point))]
-         (.attr curve (js-obj "stroke" "black"
-                              "stroke-width" path-width
-                              "stroke-linecap" "round"
-                              "stroke-linejoin" "round"))
-         curve))
+     paper
+     (setup-paper $container)
 
-     draw-loop
-     (fn [initial-point]
-       (let [curve (new-path initial-point)]
-         (go 
-           (loop [points [initial-point]]
-             (update-path curve points false)
-             (let [[message-name data] (<! draw-ch)]
-               (if (= message-name :draw)
-                 (let [new-points (if (> (distance-squared (last points) data) sq-new-point-threshold)
-                                    (conj points data)
-                                    points)]
-                   (if (should-close? points)
-                     (do (update-path curve points true)
-                         curve)
-                     (recur new-points)))
-                 curve))))))
-
-
-     add-background 
+     start
      (fn []
-       (let [rect (.rect paper 0 0 width height)]
-         (.attr rect (js-obj "fill" "270-#fff-#808080"
-                             "stroke" 0))))
-
-     disable-drag-selection
-     (fn []
-       (jq/on $container :mousedown jq/prevent))
-
-     initialize
-     (fn []
-       (add-background)
-       (disable-drag-selection)
-       (jq/css $container :display "inline-block")
        (go
          (loop [dots (create-random-dots num-initial-dots paper [])
                 score 0]
            (.text $score-field (str "Score: " score))
            (let [[_ point] (<! (next-message #{:drawstart} draw-ch))]
-             (let [curve (<! (draw-loop point))]
+             (let [curve (<! (get-drawn-path paper draw-ch point))]
                (if (path-is-closed? curve)
                  (do
                    (let [enclosed-dots (enclosed-dots curve dots)
@@ -317,4 +311,4 @@
                    (animate-invalid-exit curve)
                    (recur dots score))))))))
      ]
-    (initialize)))
+    (start)))
