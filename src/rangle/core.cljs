@@ -45,18 +45,23 @@
 (def sq-close-tolerance (square close-tolerance))
 (def sq-min-dot-distance (square min-dot-distance))
 
-(defn xy-message [ch message-name e]
-  (put! ch [message-name [(.-offsetX e) (.-offsetY e)]]))
+(defn event-location [$container e]
+  (let [x (- (.-pageX e) (-> $container .offset .-left))
+        y (- (.-pageY e) (-> $container .offset .-top))]
+    [x y]))
 
-(defn mousemove-handler [ch e]
+(defn xy-message [ch message-name $container e]
+  (put! ch [message-name (event-location $container e)]))
+
+(defn mousemove-handler [ch $container e]
   (if (pos? (.-which e))
-    (xy-message ch :draw e)
+    (xy-message ch :draw $container e)
     (put! ch [:drawend])))
 
 (defn draw-channel [$element]
   (let [ch (chan)]
-    (jq/on $element :mousemove (partial mousemove-handler ch))
-    (jq/on $element :mousedown (partial xy-message ch :drawstart))
+    (jq/on $element :mousemove (partial mousemove-handler ch $element))
+    (jq/on $element :mousedown (partial xy-message ch :drawstart $element))
     (jq/on $element [:mouseup :mouseleave] (fn [] (put! ch [:drawend])))
     ch))
 
