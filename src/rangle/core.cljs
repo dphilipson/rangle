@@ -24,8 +24,10 @@
 
 (def dot-radius 5)
 (def dot-border-width 3)
+(def dot-fadein-millis 250)
+(def dot-fadein-radius (* 2 dot-radius))
 (def dot-fadeout-millis 500)
-(def dot-fadeout-radius (* 2 dot-radius))
+(def dot-fadeout-radius (* 3 dot-radius))
 
 (def min-dot-distance 25)
 (def min-dot-edge-distance min-dot-distance)
@@ -109,7 +111,7 @@
   (async-some (comp message-name-set first) ch))
 
 (defn update-path [path points closed?]
-  (.attr path "path" (log-return-value "pathstring: " smooth-path-from-points points closed?)))
+  (.attr path "path" (smooth-path-from-points points closed?)))
 
 (defn should-close? [points]
   (and (some #(> (distance-squared (first points) %) sq-close-tolerance) points)
@@ -169,8 +171,27 @@
   (let [dot-element (.circle paper x y dot-radius)]
     (.attr dot-element (js-obj "fill" color
                                "stroke" "gray"
-                               "stroke-width" dot-border-width))
-    dot-element))
+                               "stroke-width" dot-border-width
+                               "opacity" 0))
+    (.animate dot-element (js-obj "opacity" 1) dot-fadein-millis "<>")
+    (.animate dot-element
+              (js-obj "r" dot-fadein-radius)
+              (/ dot-fadein-millis 2)
+              "<"
+              (fn []
+                (.animate dot-element
+                          (js-obj "r" dot-radius)
+                          (/ dot-fadeout-millis 2)
+                          ">")))))
+
+(defn animate-dot-exit [dot]
+  (let [dot-element (:element dot)]
+    (.animate dot-element (js-obj "opacity" 0) dot-fadeout-millis "<>")
+    (.animate dot-element
+              (js-obj "r" dot-fadeout-radius)
+              dot-fadeout-millis
+              "<>"
+              (fn [] (.remove dot-element)))))
 
 (defn create-dot [paper color loc]
   {:element (create-dot-element paper color loc)
@@ -187,27 +208,14 @@
   (create-dot paper (random-color) (random-dot-location (dot-locations current-dots))))
 
 (defn create-random-dots [n paper current-dots]
+  "Creates n new dots, taking into account the positions of the current dots.
+  Returns all the dots, old and new."
   (loop [i n
-         dots current-dots
-         new-dots []]
+         dots current-dots]
     (if (zero? i)
-      new-dots
+      dots
       (let [new-dot (create-random-dot paper dots)]
-        (recur (dec i) (conj dots new-dot) (conj new-dots new-dot))))))
-
-(defn animate-dot-exit [dot]
-  (let [dot-element (:element dot)]
-    (.animate dot-element (js-obj "opacity" 0) dot-fadeout-millis "<>")
-    (.animate dot-element
-              (js-obj "r" dot-fadeout-radius)
-              (/ dot-fadeout-millis 2)
-              "<"
-              (fn []
-                (.animate dot-element
-                          (js-obj "r" 0)
-                          (/ dot-fadeout-millis 2)
-                          ">"
-                          (fn [] (.remove dot-element)))))))
+        (recur (dec i) (conj dots new-dot))))))
 
 (defn enclosed-dots [path dots]
   (filter (fn [dot]
@@ -215,16 +223,14 @@
               (.isPointInside path x y)))
           dots))
 
-(defn test-dots [paper n]
-  (loop [i n
-         locs []]
-    (if (pos? i)
-      (let [loc (random-dot-location locs)]
-        (if loc
-          (let [dot (create-dot paper "green" loc)]
-            (animate-dot-exit dot)))
-        (let [new-locs (if loc (conj locs loc) locs)]
-          (recur (dec i) new-locs))))))
+(defn same-color? [dots]
+  (if (empty? dots)
+    true
+    (let [color (:color (first dots))]
+      (every? (comp (partial = color) :color) dots))))
+
+(defn num-dots-to-add [num-dots-removed]
+  (quot (* 4 num-dots-removed) 3))
 
 (defn ^:export inhabit [selector]
   (let
@@ -282,19 +288,24 @@
        (disable-drag-selection)
        (jq/css $container :display "inline-block")
        (go
-         (loop [curve nil
-                dots (create-random-dots num-initial-dots paper [])]
+         (loop [dots (create-random-dots num-initial-dots paper [])]
            (let [[_ point] (<! (next-message #{:drawstart} draw-ch))]
-             (if curve (.remove curve))
              (let [curve (<! (draw-loop point))]
                (if (path-is-closed? curve)
                  (do
-                   (animate-loop-exit curve)
-                   (let [dots-to-remove (set (enclosed-dots curve dots))]
+                   (let [enclosed-dots (enclosed-dots curve dots)
+                         dots-to-remove (if (same-color? enclosed-dots)
+                                          (set enclosed-dots)
+                                          #{})
+                         remaining-dots (filter #(not (contains? dots-to-remove %)) dots)
+                         new-dots (create-random-dots (num-dots-to-add (count dots-to-remove))
+                                                      paper
+                                                      remaining-dots)]
                      (doseq [dot dots-to-remove] (animate-dot-exit dot))
-                     (recur curve (filter #(not (contains? dots-to-remove %)) dots))))
+                     (animate-loop-exit curve)
+                     (recur new-dots)))
                  (do
                    (animate-invalid-exit curve)
-                   (recur curve dots))))))))
+                   (recur dots))))))))
      ]
     (initialize)))
